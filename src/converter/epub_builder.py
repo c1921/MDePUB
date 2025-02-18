@@ -11,13 +11,15 @@ class EPUBBuilder:
         self.author = author
         self.uuid = str(uuid.uuid4())
         self.items: List[Dict[str, str]] = []
+        self.nav_points: List[Dict[str, str]] = []  # 添加导航点列表
         
-    def add_item(self, href: str, media_type: str = "application/xhtml+xml") -> None:
+    def add_item(self, href: str, title: Optional[str] = None, media_type: str = "application/xhtml+xml") -> None:
         """
         添加一个内容项到EPUB中
         
         Args:
             href: 内容文件的相对路径
+            title: 导航标题（可选，默认使用文件名）
             media_type: 文件的MIME类型
         """
         item_id = f"item_{len(self.items) + 1}"
@@ -27,6 +29,21 @@ class EPUBBuilder:
             "media_type": media_type
         })
         
+        # 为XHTML文件添加导航点
+        if media_type == "application/xhtml+xml":
+            if title is None:
+                # 从文件名生成标题
+                title = os.path.splitext(os.path.basename(href))[0]
+                # 将连字符和下划线替换为空格
+                title = title.replace('-', ' ').replace('_', ' ').title()
+            
+            nav_point = {
+                "id": f"nav_{len(self.nav_points) + 1}",
+                "title": title,
+                "href": href
+            }
+            self.nav_points.append(nav_point)
+    
     def create_epub_structure(self, output_dir: str) -> None:
         """
         创建EPUB所需的基本目录结构和文件
@@ -45,6 +62,13 @@ class EPUBBuilder:
         
         # 创建container.xml
         self._create_container_xml(meta_inf_dir)
+        
+        # 添加toc.ncx到items列表
+        self.items.append({
+            "id": "ncx",
+            "href": "toc.ncx",
+            "media_type": "application/x-dtbncx+xml"
+        })
         
     def _create_mimetype(self, output_dir: str) -> None:
         """
@@ -103,7 +127,7 @@ class EPUBBuilder:
         {self._generate_manifest_items()}
     </manifest>
     
-    <spine>
+    <spine toc="ncx">
         {self._generate_spine_items()}
     </spine>
 </package>'''
@@ -112,6 +136,9 @@ class EPUBBuilder:
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(content_opf)
             
+        # 生成toc.ncx文件
+        self._generate_toc_ncx(oebps_dir)
+        
         return output_path
     
     def _generate_manifest_items(self) -> str:
@@ -265,4 +292,50 @@ class EPUBBuilder:
         if not filename.lower().endswith('.epub'):
             filename += '.epub'
             
-        return filename 
+        return filename
+    
+    def _generate_toc_ncx(self, oebps_dir: str) -> None:
+        """
+        生成toc.ncx文件
+        
+        Args:
+            oebps_dir: OEBPS目录路径
+        """
+        nav_points = '\n'.join(self._generate_nav_points())
+        
+        toc_ncx = f'''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+    <head>
+        <meta name="dtb:uid" content="{self.uuid}"/>
+        <meta name="dtb:depth" content="1"/>
+        <meta name="dtb:totalPageCount" content="0"/>
+        <meta name="dtb:maxPageNumber" content="0"/>
+    </head>
+    <docTitle>
+        <text>{self.title}</text>
+    </docTitle>
+    <docAuthor>
+        <text>{self.author}</text>
+    </docAuthor>
+    <navMap>
+        {nav_points}
+    </navMap>
+</ncx>'''
+        
+        output_path = os.path.join(oebps_dir, 'toc.ncx')
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(toc_ncx)
+    
+    def _generate_nav_points(self) -> List[str]:
+        """生成导航点列表"""
+        nav_points = []
+        for point in self.nav_points:
+            nav_point = f'''        <navPoint id="{point['id']}" playOrder="{len(nav_points) + 1}">
+            <navLabel>
+                <text>{point['title']}</text>
+            </navLabel>
+            <content src="{point['href']}"/>
+        </navPoint>'''
+            nav_points.append(nav_point)
+        return nav_points 
