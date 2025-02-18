@@ -1,8 +1,9 @@
 import os
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import uuid
 import zipfile
 from datetime import datetime
+import hashlib
 
 class EPUBBuilder:
     def __init__(self, title: str, author: str = "Unknown"):
@@ -143,6 +144,13 @@ class EPUBBuilder:
         Returns:
             生成的EPUB文件路径
         """
+        # 先验证所需文件是否都存在
+        for item in self.items:
+            # 使用正斜杠，确保路径格式一致
+            file_path = os.path.join(temp_dir, 'OEBPS', item['href']).replace('\\', '/')
+            if not os.path.exists(file_path):
+                raise ValueError(f"找不到必需的文件: {item['href']}")
+        
         if epub_name is None:
             epub_name = f"{self.title}.epub"
         
@@ -166,7 +174,77 @@ class EPUBBuilder:
                     arcname = os.path.relpath(file_path, temp_dir)
                     epub.write(file_path, arcname)
         
+        # 验证生成的EPUB文件
+        validation_result = self.validate_epub(epub_path)
+        if not validation_result[0]:
+            # 如果验证失败，删除已生成的文件
+            os.remove(epub_path)
+            raise ValueError(f"EPUB文件验证失败: {validation_result[1]}")
+            
         return epub_path
+    
+    def validate_epub(self, epub_path: str) -> Tuple[bool, str]:
+        """
+        验证EPUB文件的完整性
+        
+        Args:
+            epub_path: EPUB文件路径
+            
+        Returns:
+            (是否验证通过, 错误信息)的元组
+        """
+        try:
+            with zipfile.ZipFile(epub_path, 'r') as epub:
+                # 1. 验证ZIP文件完整性
+                zip_test = epub.testzip()
+                if zip_test is not None:
+                    return False, f"ZIP文件损坏，首个错误文件: {zip_test}"
+                
+                # 2. 验证必需文件是否存在
+                required_files = [
+                    'mimetype',
+                    'META-INF/container.xml',
+                    'OEBPS/content.opf'
+                ]
+                
+                for file in required_files:
+                    try:
+                        epub.getinfo(file)
+                    except KeyError:
+                        return False, f"缺少必需文件: {file}"
+                
+                # 3. 验证mimetype文件
+                mimetype_content = epub.read('mimetype').decode('utf-8')
+                if mimetype_content != 'application/epub+zip':
+                    return False, "mimetype文件内容不正确"
+                
+                # 4. 验证mimetype是否为第一个文件且未压缩
+                if epub.filelist[0].filename != 'mimetype' or epub.filelist[0].compress_type != zipfile.ZIP_STORED:
+                    return False, "mimetype必须是第一个且未压缩的文件"
+                
+                # 5. 验证content.opf中列出的文件是否都存在
+                content_opf = epub.read('OEBPS/content.opf').decode('utf-8')
+                for item in self.items:
+                    # 使用正斜杠，确保路径格式一致
+                    file_path = os.path.join('OEBPS', item['href']).replace('\\', '/')
+                    try:
+                        epub.getinfo(file_path)
+                    except KeyError:
+                        return False, f"content.opf中列出的文件不存在: {file_path}"
+                
+                # 6. 计算并记录文件校验和
+                checksums = {}
+                for file in epub.filelist:
+                    if file.filename != 'mimetype':  # mimetype已经验证过
+                        content = epub.read(file.filename)
+                        checksums[file.filename] = hashlib.md5(content).hexdigest()
+                
+                return True, "验证通过"
+                
+        except zipfile.BadZipFile:
+            return False, "无效的ZIP文件"
+        except Exception as e:
+            return False, f"验证过程出错: {str(e)}"
     
     def _sanitize_filename(self, filename: str) -> str:
         """

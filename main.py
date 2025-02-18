@@ -73,6 +73,15 @@ def main():
         print("\n正在打包EPUB文件...")
         epub_path = builder.create_epub(temp_dir, output_dir=output_dir)
         
+        # 验证EPUB文件
+        print("\n正在验证EPUB文件...")
+        validation_result = builder.validate_epub(epub_path)
+        if validation_result[0]:
+            print("✓ EPUB文件验证通过")
+        else:
+            print(f"✗ EPUB文件验证失败: {validation_result[1]}")
+            return
+        
         # 输出转换结果
         print(f"\n转换完成！")
         print(f"共转换 {len(converted_files)} 个文件:")

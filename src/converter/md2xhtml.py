@@ -98,8 +98,8 @@ class MarkdownConverter:
             # 转换文件
             self.convert_file(file_path, output_path)
             
-            # 添加相对于OEBPS的路径
-            rel_output_path = os.path.relpath(output_path, oebps_dir)
+            # 添加相对于OEBPS的路径（使用正斜杠，确保路径格式一致）
+            rel_output_path = os.path.relpath(output_path, oebps_dir).replace('\\', '/')
             converted_files.append(rel_output_path)
         
         for root, dirs, files in os.walk(input_dir):
